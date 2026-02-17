@@ -57,13 +57,152 @@ library(survminer)
 
 reproductive <- read.csv('update25_participant.csv') #dataset with 273036 UKBB women
 
+# Replace empty strings with NA
 reproductive[reproductive == ""] <- NA
 
-unique(reproductive$Age.at.menopause..last.menstrual.period....Instance.0)
 
-# Lets create the age at menopause/ bilat/ hyst variables 
+################ time to event/ event status 
 
-colnames(reproductive)
+#### Add new death, dementia/ loss to followup 
+
+newdeath<- read.csv("newoutcomes25_death.csv")
+
+newoc<- read.csv("newoutcomes25_participant.csv")
+
+newdeath[newdeath == ""] <- NA
+
+newdeath_earliest <- newdeath %>%
+  mutate(Date.of.death = as.Date(Date.of.death)) %>%
+  group_by(Participant.ID) %>%
+  summarise(
+    date_death25 = if (all(is.na(Date.of.death))) NA else max(Date.of.death, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+reproductive<- reproductive%>%
+  left_join(newdeath_earliest%>%
+              dplyr::select(Participant.ID, date_death25),
+            by='Participant.ID')
+
+newoc$Date.lost.to.follow.up25 <- newoc$Date.lost.to.follow.up
+
+newoc$Date.of.all.cause.dementia.report25 <- newoc$newoc$Date.of.all.cause.dementia.report
+
+
+newoc <- newoc %>%
+  mutate(
+    Date.of.all.cause.dementia.report =
+      na_if(Date.of.all.cause.dementia.report, "Date is unknown"),
+    Date.of.all.cause.dementia.report =
+      na_if(Date.of.all.cause.dementia.report, "")
+  )
+
+newoc <- newoc %>%
+  mutate(
+    dementia_date25 = coalesce(
+      as.Date(Date.of.all.cause.dementia.report),
+      as.Date(Date.F00.first.reported..dementia.in.alzheimer.s.disease.),
+      as.Date(Date.F01.first.reported..vascular.dementia.),
+      as.Date(Date.F02.first.reported..dementia.in.other.diseases.classified.elsewhere.),
+      as.Date(Date.F03.first.reported..unspecified.dementia.)
+    )
+  )
+
+newoc <- newoc %>%
+  mutate(
+    Date.lost.to.follow.up25=
+      na_if(Date.lost.to.follow.up, "")
+  )
+
+
+reproductive<- reproductive%>%
+  left_join(newoc%>%
+              dplyr::select(Participant.ID, Date.lost.to.follow.up25, dementia_date25),
+            by='Participant.ID')
+
+# time to event/ event status 
+
+reproductive$End_Point <- as.Date("2025-07-01")
+
+reproductive<- reproductive%>%
+  mutate(
+    across(c(Date.of.attending.assessment.centre...Instance.0,
+             dementia_date25,
+             date_death25,
+             Date.lost.to.follow.up25,
+             End_Point), ~ as.Date(.x)),
+    
+    # Determine event or censoring date
+    event_date = case_when(
+      !is.na(dementia_date25) ~ dementia_date25,
+      is.na(dementia_date25) & !is.na(date_death25) ~ date_death25,
+      is.na(dementia_date25) & is.na(date_death25) &
+        !is.na(Date.lost.to.follow.up25) ~ Date.lost.to.follow.up25,
+      TRUE ~ End_Point
+    ),
+    
+    # Calculate time to event or censoring (years)
+    time_to_event_years = as.numeric(
+      difftime(event_date,
+               Date.of.attending.assessment.centre...Instance.0,
+               units = "days")
+    ) / 365.25,
+    
+    # Dementia event indicator (1 = dementia, 0 = censored)
+    event_status = if_else(!is.na(dementia_date25), 1, 0)
+  )
+
+
+
+# 273036 at start
+
+summary(reproductive$time_to_event_years)
+sum(reproductive$time_to_event_years < 0, na.rm = TRUE) # 103 people with prev dementia
+
+reproductive<- reproductive%>%
+  mutate(
+    dementia_within5 = event_status == 1 & time_to_event_years <=5
+  )
+
+t <- reproductive%>%
+  group_by(time_to_event_years,(event_status == 1))%>%
+  summarise(cnt=n_distinct(Participant.ID))### 430 additional women with prev dementia 
+
+reproductive%>%
+  group_by(event_status)%>%
+  summarise(cnt=n_distinct(Participant.ID))
+
+# Remove additonal women with dementia prior to baseline or dementia within 5 years of baseline
+
+reproductive_clean<- reproductive %>%
+  filter(
+    dementia_within5==FALSE,# drop early dementia
+    !is.na(time_to_event_years),# drop missing time to event
+    time_to_event_years >0       # drop any negative times
+  )
+
+sum(reproductive_clean$dementia_within5 < 0, na.rm = TRUE)
+
+reproductive_clean%>%
+  group_by(dementia_within5)%>%
+  summarise(cnt=n_distinct(Participant.ID))
+
+reproductive_clean<- reproductive_clean%>%
+  mutate(
+    # ensure dates are Date class
+    baseline_date = as.Date(Date.of.attending.assessment.centre...Instance.0),
+    event_date    = as.Date(event_date),
+    age_baseline = Age.when.attended.assessment.centre...Instance.0,
+    
+    # compute age at event
+    age_at_event = age_baseline+ as.numeric(event_date - baseline_date) / 365.25
+  )
+
+n_distinct(reproductive_clean$Participant.ID)# now we have 272606 women
+
+## We'll remove all who said no, prefer not to answer, not sure other reason, and keep not sure hysterectomy
+
+unique(reproductive_clean$Age.at.menopause..last.menstrual.period....Instance.0)
 
 to_num_clean <- function(x) {
   x <- as.character(x)
@@ -71,50 +210,49 @@ to_num_clean <- function(x) {
   suppressWarnings(as.numeric(x))
 }
 
-reproductive <- reproductive %>%
-  mutate(
-    meno_0  = to_num_clean(`Age.at.menopause..last.menstrual.period....Instance.0`),
-    bo_0    = to_num_clean(`Age.at.bilateral.oophorectomy..both.ovaries.removed....Instance.0`),
-    hyst_0  = to_num_clean(`Age.at.hysterectomy...Instance.0`)
-  )
 
-reproductive <- reproductive %>%
+reproductive_clean <- reproductive_clean %>%
   mutate(
-    age_meno_natural = meno_0,
-    age_bilateral_oophorectomy_combined = bo_0,
-    age_hysterectomy_combined = hyst_0,
-    
-    # combined menopause age: natural if available, else BO
-    age_menopause_combined = if_else(
-      !is.na(age_meno_natural),
-      age_meno_natural,
-      age_bilateral_oophorectomy_combined
+    age_meno_natural = to_num_clean(`Age.at.menopause..last.menstrual.period....Instance.0`),
+    age_bilateral_oophorectomy_combined = to_num_clean(`Age.at.bilateral.oophorectomy..both.ovaries.removed....Instance.0`),
+    age_hysterectomy_combined = to_num_clean(`Age.at.hysterectomy...Instance.0`)
+  ) %>%
+  mutate(
+    age_menopause_combined = case_when(
+      !is.na(age_meno_natural) & !is.na(age_bilateral_oophorectomy_combined) ~ 
+        age_meno_natural,
+      
+      !is.na(age_meno_natural) ~ age_meno_natural,
+      
+      !is.na(age_bilateral_oophorectomy_combined) ~ 
+        age_bilateral_oophorectomy_combined,
+      
+      TRUE ~ NA_real_
     )
   )
 
-reproductive <- reproductive %>%
+
+# recode meno age as factor
+
+reproductive_clean<- reproductive_clean %>%
   mutate(
-    had_hysterectomy_before_menopause = if_else(
-      !is.na(age_hysterectomy_combined) &
-        !is.na(age_meno_natural) &
-        age_hysterectomy_combined < age_meno_natural,
-      "Y", "N"
-    ),
-    had_bilateral_oophorectomy_before_menopause = if_else(
-      !is.na(age_bilateral_oophorectomy_combined) &
-        !is.na(age_meno_natural) &
-        age_bilateral_oophorectomy_combined < age_meno_natural,
-      "Y", "N"
+    meno_group3 = case_when(
+      age_menopause_combined < 40 ~ "Premature (<40)",        # Premature Ovarian Insufficiency (POI)
+      age_menopause_combined >= 40 & age_menopause_combined< 45 ~ "Early (40–44)", # Early menopause
+      age_menopause_combined>= 45 & age_menopause_combined<= 55 ~ "Average (45–55)", # Typical menopause
+      age_menopause_combined > 55 ~ "Late (55+)",             # Late menopause
+      TRUE ~ NA_character_
     )
   )
 
-sum(is.na(reproductive$age_menopause_combined))
-sum(is.na(reproductive$age_meno_natural))
-sum(is.na(reproductive$age_bilateral_oophorectomy_combined))
-
-summary(reproductive$age_menopause_combined)
+reproductive_clean%>%
+  group_by(meno_group3)%>%
+  summarise(cnt=n_distinct(Participant.ID)) #missing: 105604
 
 
+# add on the diet and had_menopause variables 
+
+diet<- read.csv('diet_participant.csv')
 
 ### Need to handle women who said they had not reached menopause or were not sure
 
@@ -124,12 +262,11 @@ reproductive_clean <- reproductive_clean %>%
   left_join(
     diet %>%
       dplyr::select(Participant.ID,
-                    had_menopause,
-                    HealthyDietScore_HDS,
-                    HealthyDiet_HDS_bin),
+                    had_menopause),
     by = "Participant.ID"
   )
-
+reproductive_clean$had_menopause.x <- NULL
+reproductive_clean$had_menopause.y <- NULL
 
 ### Need to handle women who said they had not reached menopause or were not sure
 
@@ -137,40 +274,31 @@ reproductive_clean%>%
   group_by(had_menopause)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
+## remove No, NA, Not Sure-other reason
 
-check <- reproductive_clean%>%filter(grepl("No| Not sure|Prefer", had_menopause))
 
-t <- check%>%
-  group_by(Age.at.bilateral.oophorectomy..both.ovaries.removed....Instance.0)%>%
+reproductive_rm<- reproductive_clean%>%filter(grepl("Yes|hyster", had_menopause)) ## now we have a sample of 195977 women
+
+# remove NA on menopause age leaving us with 166,736
+
+reproductive_rm <- reproductive_rm %>%
+  filter(!is.na(meno_group3))
+
+# check groups
+
+reproductive_rm%>%
+  group_by(meno_group3)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-
-## We'll remove all who said no, prefer not to answer, not sure other reason, and keep not sure hysterectomy
-
-reproductive_clean_rm <- reproductive_clean%>%filter(grepl("Yes|hyster", had_menopause))
-
-
-reproductive_clean%>%
+reproductive_rm%>%
   group_by(had_menopause)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-
-check <- reproductive_clean%>%filter(grepl("No| Not sure|Prefer", had_menopause))
-
-t <- check%>%
-  group_by(Age.at.bilateral.oophorectomy..both.ovaries.removed....Instance.0)%>%
+reproductive_rm%>%
+  group_by(is.na(age_menopause_combined))%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-
-## We'll remove all who said no, prefer not to answer, not sure other reason, and keep not sure hysterectomy
-
-reproductive_clean_rm <- reproductive_clean%>%filter(grepl("Yes|hyster", had_menopause))
-
-## now we have a sample of 166745 women
-
-reproductive_clean_rm%>%
-  group_by(had_menopause)%>%
-  summarise(cnt=n_distinct(Participant.ID))
+### Now we have 8286 premature menopause, 13715 late, 16768 early, 127967 average
 
 # Add all ages when attended assessment centre 
 
@@ -1177,121 +1305,6 @@ reproductive <- reproductive %>%
     by = c("Participant.ID" = "ID")
   )
 
-# time to event/ event status 
-
-reproductive$End_Point <- as.Date("2024-07-07")
-
-reproductive <- reproductive %>%
-  mutate(
-    across(c(Date.of.attending.assessment.centre...Instance.0,
-             Date.of.all.cause.dementia.report,
-             Date.of.death...Instance.0,
-             Date.lost.to.follow.up,
-             End_Point), ~ as.Date(.x)),
-    
-    # Determine event or censoring date
-    event_date = case_when(
-      !is.na(Date.of.all.cause.dementia.report) ~ Date.of.all.cause.dementia.report,
-      is.na(Date.of.all.cause.dementia.report) & !is.na(Date.of.death...Instance.0) ~ Date.of.death...Instance.0,
-      is.na(Date.of.all.cause.dementia.report) & is.na(Date.of.death...Instance.0) &
-        !is.na(Date.lost.to.follow.up) ~ Date.lost.to.follow.up,
-      TRUE ~ End_Point
-    ),
-    
-    # Calculate time to event or censoring (years)
-    time_to_event_years = as.numeric(
-      difftime(event_date,
-               Date.of.attending.assessment.centre...Instance.0,
-               units = "days")
-    ) / 365.25,
-    
-    # Dementia event indicator (1 = dementia, 0 = censored)
-    event_status = if_else(!is.na(Date.of.all.cause.dementia.report), 1, 0)
-  )
-
-
-
-# dx download reproductive.csv 
-reproductive <- read.csv("reproductive.csv")
-reproductive$X <- NULL
-
-# 273036 at start
-# 99 people with dementia prior to baseline- we will remove
-
-summary(reproductive$time_to_event_years)
-sum(reproductive$time_to_event_years < 0, na.rm = TRUE)
-
-sum(is.na(reproductive$Date.of.attending.assessment.centre...Instance.0))
-
-# 417 people got dementia within 5 years of baseline- also remove 
-
-reproductive <- reproductive %>%
-  mutate(
-    dementia_within5 = event_status == 1 & time_to_event_years <= 5
-  )
-
-reproductive <- reproductive %>%
-  mutate(
-    dementia_within1 = event_status == 1 & time_to_event_years <= 1
-  )
-
-#write.csv(reproductive,"reproductive.csv")
-
-reproductive%>%
-  group_by(dementia_within5)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-# people with no meno age is 105732 105998 266+ 
-
-t <- reproductive%>%
-  group_by(Age.at.menopause..last.menstrual.period....Instance.0)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-t <- reproductive%>%
-  group_by(age_menopause_combined)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-# recode meno age as factor
-
-reproductive<- reproductive %>%
-  mutate(
-    meno_group3 = case_when(
-      age_menopause_combined< 40 ~ "Premature (<40)",        # Premature Ovarian Insufficiency (POI)
-      age_menopause_combined >= 40 & age_menopause_combined< 45 ~ "Early (40–44)", # Early menopause
-      age_menopause_combined>= 45 & age_menopause_combined<= 55 ~ "Average (45–55)", # Typical menopause
-      age_menopause_combined > 55 ~ "Late (55+)",             # Late menopause
-      TRUE ~ NA_character_
-    )
-  )
-
-reproductive%>%
-  group_by(meno_group3)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-# remove NA on menopause age leaving us with 167304
-
-
-reproductive_na <- reproductive %>%
-  filter(!is.na(meno_group3))
-
-
-
-reproductive_na%>%
-  group_by(had_bilateral_oophorectomy_before_menopause)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-reproductive_na%>%
-  group_by(dementia_within5)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-# Remove women with dementia prior to baseline or dementia within 5 years of baseline (293)
-
-reproductive_lag <- reproductive_na %>%
-  filter(
-    dementia_within5==FALSE,              # drop early dementia
-    !is.na(time_to_event_years),   # keep only those with valid follow-up
-    time_to_event_years >= 0       # drop any negative times
-  )
 
 ## Transform vitamins to yes/no
 
