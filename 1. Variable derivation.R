@@ -17,6 +17,7 @@ library(mediation)
 library(survival)
 install.packages('survminer')
 library(survminer)
+library(forcats)
 
 ## Variables in study:
 # Age at menopause (Premature=<40, Early=40-44, Average=45-54, Late=55+)
@@ -53,7 +54,7 @@ library(survminer)
 # APOE4 carriage
 
 
-# Age at menopause (Premature=<40, Early=40-44, Average=45-54, Late=55+)
+# Get age at menopause (Premature=<40, Early=40-44, Average=45-54, Late=55+)
 
 reproductive <- read.csv('update25_participant.csv') #dataset with 273036 UKBB women
 
@@ -70,6 +71,7 @@ newdeath<- read.csv("newoutcomes25_death.csv")
 newoc<- read.csv("newoutcomes25_participant.csv")
 
 newdeath[newdeath == ""] <- NA
+newoc[newoc == ""] <- NA
 
 newdeath_earliest <- newdeath %>%
   mutate(Date.of.death = as.Date(Date.of.death)) %>%
@@ -166,13 +168,13 @@ reproductive<- reproductive%>%
 
 t <- reproductive%>%
   group_by(time_to_event_years,(event_status == 1))%>%
-  summarise(cnt=n_distinct(Participant.ID))### 430 additional women with prev dementia 
+  summarise(cnt=n_distinct(Participant.ID))### 430 women with dementia in 5 years or less
 
 reproductive%>%
   group_by(event_status)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-# Remove additonal women with dementia prior to baseline or dementia within 5 years of baseline
+# Remove 430 women with dementia prior to baseline or dementia within 5 years of baseline
 
 reproductive_clean<- reproductive %>%
   filter(
@@ -250,11 +252,11 @@ reproductive_clean%>%
   summarise(cnt=n_distinct(Participant.ID)) #missing: 105604
 
 
-# add on the diet and had_menopause variables 
+# download the diet and had_menopause variables 
 
 diet<- read.csv('diet_participant.csv')
 
-### Need to handle women who said they had not reached menopause or were not sure
+### Need to handle inconsistencies in those who reached menopause but no menopause age
 
 diet$had_menopause <- diet$Had.menopause...Instance.0
 
@@ -265,8 +267,7 @@ reproductive_clean <- reproductive_clean %>%
                     had_menopause),
     by = "Participant.ID"
   )
-reproductive_clean$had_menopause.x <- NULL
-reproductive_clean$had_menopause.y <- NULL
+
 
 ### Need to handle women who said they had not reached menopause or were not sure
 
@@ -277,9 +278,11 @@ reproductive_clean%>%
 ## remove No, NA, Not Sure-other reason
 
 
-reproductive_rm<- reproductive_clean%>%filter(grepl("Yes|hyster", had_menopause)) ## now we have a sample of 195977 women
+reproductive_rm<- reproductive_clean%>%filter(grepl("Yes|hyster", had_menopause)) 
 
-# remove NA on menopause age leaving us with 166,736
+## now we have a sample of 195977 women
+
+# remove NA (29241) on menopause age on the remainder, leaving us with 166,736
 
 reproductive_rm <- reproductive_rm %>%
   filter(!is.na(meno_group3))
@@ -300,32 +303,11 @@ reproductive_rm%>%
 
 ### Now we have 8286 premature menopause, 13715 late, 16768 early, 127967 average
 
-# Add all ages when attended assessment centre 
-
-# dx download ageupdate_participant.csv
-
-age <- read.csv('ageupdate_participant.csv')
-
-reproductive$Age.when.attended.assessment.centre...Instance.0
-
-age[age == ""] <- NA
-
-reproductive <- reproductive %>%
-  left_join(
-    age %>% 
-      dplyr::select(Participant.ID, 
-                    Age.when.attended.assessment.centre...Instance.1,
-                    Age.when.attended.assessment.centre...Instance.2,
-                    Age.when.attended.assessment.centre...Instance.3
-      ),
-    by = "Participant.ID"
-  )
+# Add parity and durations of HRT/ OC:
 
 # Get variable list
 
-colnames(reproductive)
-
-library(dplyr)
+colnames(reproductive_rm)
 
 ## Helper for NA-like strings
 na_strings <- c("Do not know", "Prefer not to answer", "")
@@ -360,9 +342,9 @@ compute_duration <- function(age_start,
   dur
 }
 
-## Create years_hrt, hrt_group, years_oc, oc_group, and number_births_group (Instance 0 only)
+## Create years_hrt, hrt_group, years_oc, oc_group, and number_births_group:
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     ## Years on HRT (Instance 0 only)
     years_hrt = compute_duration(
@@ -375,7 +357,7 @@ reproductive <- reproductive %>%
     hrt_group = case_when(
       years_hrt == 0                        ~ "≤1 year",
       years_hrt > 0  & years_hrt <= 5       ~ "≤5 years",
-      years_hrt > 5  & years_hrt <= 10      ~ "5–10 years",
+      years_hrt > 5  & years_hrt <= 10      ~ "6–10 years",
       years_hrt > 10                        ~ ">10 years",
       TRUE                                  ~ "None"
     ),
@@ -391,7 +373,7 @@ reproductive <- reproductive %>%
     oc_group = case_when(
       years_oc == 0                        ~ "≤1 year",
       years_oc > 0  & years_oc <= 5        ~ "≤5 years",
-      years_oc > 5  & years_oc <= 10       ~ "5–10 years",
+      years_oc > 5  & years_oc <= 10       ~ "6–10 years",
       years_oc > 10                        ~ ">10 years",
       TRUE                                 ~ "None"
     ),
@@ -422,60 +404,34 @@ reproductive <- reproductive %>%
   )
 
 
-### ## We'll remove all who said no, prefer not to answer, not sure other reason, and keep not sure hysterectomy
+### Check numbers 
 
-reproductive_clean_rm <- reproductive_clean%>%filter(grepl("Yes|hyster", had_menopause))
-
-## now we have a sample of 166745 women
-
-reproductive_clean_rm%>%
-  group_by(had_menopause)%>%
+reproductive_rm%>%
+  group_by(number_births_group)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
 
-reproductive_clean_rm <- reproductive_clean_rm %>%
-  mutate(
-    # HRT group
-    hrt_group = case_when(
-      is.na(years_hrt)                 ~ "None",
-      years_hrt == 0 | years_hrt < 1   ~ "<1 year",     # <1 year includes m0
-      years_hrt >= 1 & years_hrt < 5   ~ "1–5 years",
-      years_hrt >= 5 & years_hrt <= 10 ~ "5–10 years",
-      years_hrt > 10                   ~ ">10 years"
-    ),
-    hrt_group = factor(
-      hrt_group,
-      levels = c("None", "<1 year", "1–5 years", "5–10 years", ">10 years")
-    ),
-    
-    # Oral contraceptive group
-    oc_group = case_when(
-      is.na(years_oc)                  ~ "None",
-      years_oc == 0 | years_oc < 1     ~ "<1 year",
-      years_oc >= 1 & years_oc < 5     ~ "1–5 years",
-      years_oc >= 5 & years_oc <= 10   ~ "5–10 years",
-      years_oc > 10                    ~ ">10 years"
-    ),
-    oc_group = factor(
-      oc_group,
-      levels = c("None", "<1 year", "1–5 years", "5–10 years", ">10 years")
-    )
-  )
+reproductive_rm%>%
+  group_by(hrt_group)%>%
+  summarise(cnt=n_distinct(Participant.ID))
 
+reproductive_rm%>%
+  group_by(oc_group)%>%
+  summarise(cnt=n_distinct(Participant.ID))
 
 
 # Create Quals
 
 # Create a Qualifications score with 5 highest and 0 lowest quals
 
-reproductive$Qualifications <- ifelse(
-  grepl("College or University degree", reproductive$Qualifications...Instance.0), 5,
-  ifelse(grepl("A levels/AS levels or equivalent", reproductive$Qualifications...Instance.0), 4,
-         ifelse(grepl("NVQ or HND or HNC or equivalent", reproductive$Qualifications...Instance.0), 3,
-                ifelse(grepl("O levels/GCSEs or equivalent", reproductive$Qualifications...Instance.0), 2,
-                       ifelse(grepl("CSEs or equivalent", reproductive$Qualifications...Instance.0), 1,
-                              ifelse(grepl("Other professional qualifications eg: nursing, teaching", reproductive$Qualifications...Instance.0), 5,
-                                     ifelse(grepl("None of the above", reproductive$Qualifications...Instance.0), 0, reproductive$Qualifications...Instance.0)
+reproductive_rm$Qualifications <- ifelse(
+  grepl("College or University degree", reproductive_rm$Qualifications...Instance.0), 5,
+  ifelse(grepl("A levels/AS levels or equivalent", reproductive_rm$Qualifications...Instance.0), 4,
+         ifelse(grepl("NVQ or HND or HNC or equivalent", reproductive_rm$Qualifications...Instance.0), 3,
+                ifelse(grepl("O levels/GCSEs or equivalent", reproductive_rm$Qualifications...Instance.0), 2,
+                       ifelse(grepl("CSEs or equivalent", reproductive_rm$Qualifications...Instance.0), 1,
+                              ifelse(grepl("Other professional qualifications eg: nursing, teaching", reproductive_rm$Qualifications...Instance.0), 5,
+                                     ifelse(grepl("None of the above", reproductive_rm$Qualifications...Instance.0), 0, reproductive_rm$Qualifications...Instance.0)
                               )
                        )
                 )
@@ -483,22 +439,22 @@ reproductive$Qualifications <- ifelse(
   )
 )
 
-reproductive$tertiary_degree<- ifelse(reproductive$Qualifications == 5, "Y", "N")
+reproductive_rm$tertiary_degree<- ifelse(reproductive_rm$Qualifications == 5, "Y", "N")
+
+reproductive_rm%>%
+  group_by(tertiary_degree)%>%
+  summarise(cnt=n_distinct(Participant.ID))
 
 # Ethnicity 
 
-unique(reproductive$Ethnic.background...Instance.0)
+unique(reproductive_rm$Ethnic.background...Instance.0)
 
-t <- reproductive%>%
-  group_by(Ethnic.background...Instance.0)%>%
-  summarise(count=n_distinct(Participant.ID))
-
-reproductive$Ethnicity <- ifelse(grepl("^(Mixed|White and Black Caribbean|White and Black African|White and Asian|Any other mixed background)$", reproductive$Ethnic.background...Instance.0), 'Mixed',
-                                 ifelse(grepl("^(White|British|Irish|Any other white background)$", reproductive$Ethnic.background...Instance.0), 'White',
-                                        ifelse(grepl("^(Asian or Asian British|Indian|Pakistani|Bangladeshi|Any other Asian background)$", reproductive$Ethnic.background...Instance.0), "Asian",
-                                               ifelse(grepl("^(Black or Black British|Caribbean|African|Any other Black background)$", reproductive$Ethnic.background...Instance.0), "Black",
-                                                      ifelse(grepl("^Chinese$", reproductive$Ethnic.background...Instance.0), "Chinese",
-                                                             ifelse(grepl("^Other ethnic group$", reproductive$Ethnic.background...Instance.0), "Other ethnic group", reproductive$Ethnic.background...Instance.0)
+reproductive_rm$Ethnicity <- ifelse(grepl("^(Mixed|White and Black Caribbean|White and Black African|White and Asian|Any other mixed background)$", reproductive_rm$Ethnic.background...Instance.0), 'Mixed',
+                                 ifelse(grepl("^(White|British|Irish|Any other white background)$", reproductive_rm$Ethnic.background...Instance.0), 'White',
+                                        ifelse(grepl("^(Asian or Asian British|Indian|Pakistani|Bangladeshi|Any other Asian background)$", reproductive_rm$Ethnic.background...Instance.0), "Asian",
+                                               ifelse(grepl("^(Black or Black British|Caribbean|African|Any other Black background)$", reproductive_rm$Ethnic.background...Instance.0), "Black",
+                                                      ifelse(grepl("^Chinese$", reproductive_rm$Ethnic.background...Instance.0), "Chinese",
+                                                             ifelse(grepl("^Other ethnic group$", reproductive_rm$Ethnic.background...Instance.0), "Other ethnic group", reproductive_rm$Ethnic.background...Instance.0)
                                                       )
                                                )
                                         )
@@ -507,16 +463,18 @@ reproductive$Ethnicity <- ifelse(grepl("^(Mixed|White and Black Caribbean|White 
 
 
 
-reproductive$white_yn <- ifelse(reproductive$Ethnicity == "White", "Y", "N")
+reproductive_rm$white_yn <- ifelse(reproductive_rm$Ethnicity == "White", "Y", "N")
+
+
+reproductive_rm%>%
+  group_by(white_yn)%>%
+  summarise(cnt=n_distinct(Participant.ID))
 
 ## Create new diet score Healthy Diet Score (HDS)
 
 #dx download diet_participant.csv
 
-diet <- read.csv("diet_participant.csv")
 colnames(diet)
-
-library(dplyr)
 
 # Start from your diet dataset
 # diet has:
@@ -530,7 +488,6 @@ library(dplyr)
 # "Beef.intake...Instance.0"
 # "Lamb.mutton.intake...Instance.0"
 # "Pork.intake...Instance.0"
-library(dplyr)
 
 ## 1) Helper: turn "Less than one" into 0 and then numeric for tbsp/day
 lt1_to_num <- function(x) {
@@ -668,52 +625,56 @@ mutate(
                                levels = c("Higher", "Lower"))
 )
 
-diet$had_menopause <- diet$Had.menopause...Instance.0
 
-reproductive_clean <- reproductive_clean %>%
+reproductive_rm <- reproductive_rm %>%
   left_join(
     diet %>%
       dplyr::select(Participant.ID,
-                    had_menopause,
                     HealthyDietScore_HDS,
                     HealthyDiet_HDS_bin),
     by = "Participant.ID"
   )
 
+reproductive_rm%>%
+  group_by(HealthyDietScore_HDS)%>%
+  summarise(cnt=n_distinct(Participant.ID))
+
 ############# hearing probs 
 
 deaf <- read.csv("deaf_participant.csv")
+
+colnames(reproductive_rm)
 
 unique(deaf$Hearing.aid.user...Instance.0)
 unique(deaf$Hearing.difficulty.problems...Instance.0)
 unique(deaf$Hearing.difficulty.problems.with.background.noise...Instance.0)
 
-reproductive_clean_rm$hearing_loss <- NULL
-reproductive_clean_rm$deafness <- NULL
-reproductive_clean_rm$hearing_collapsed <- NULL
-reproductive_clean_rm$hearing_difficulty.x <- NULL
-reproductive_clean_rm$hearing_difficulty.y <- NULL
-reproductive_clean_rm$hearing_aids <- NULL
-reproductive_clean_rm$hearing_probs<- NULL
-reproductive_clean_rm$hearing_problems<- NULL
-reproductive_clean_rm$hearing_severity<- NULL
-reproductive_clean_rm$Hearing.difficulty.problems...Instance.0<- NULL
-reproductive_clean_rm$Hearing.aid.user...Instance.0<- NULL
+reproductive_rm$hearing_loss <- NULL
+reproductive_rm$deafness <- NULL
+reproductive_rm$hearing_collapsed <- NULL
+reproductive_rm$hearing_difficulty.x <- NULL
+reproductive_rm$hearing_difficulty.y <- NULL
+reproductive_rm$hearing_aids <- NULL
+reproductive_rm$hearing_probs<- NULL
+reproductive_rm$hearing_problems<- NULL
+reproductive_rm$hearing_severity<- NULL
+reproductive_rm$Hearing.difficulty.problems...Instance.0<- NULL
+reproductive_rm$Hearing.aid.user...Instance.0<- NULL
 
 
-reproductive_clean_rm <- reproductive_clean_rm %>%
+reproductive_rm <- reproductive_rm %>%
   left_join(
     deaf,
     by = "Participant.ID"
   )
 
-T <- reproductive_clean_rm %>%
+T <- reproductive_rm %>%
   group_by(Hearing.difficulty.problems...Instance.0, Hearing.difficulty.problems..pilot....Instance.0, Hearing.aid.user...Instance.0, Hearing.difficulty.problems.with.background.noise...Instance.0)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
 ambig_vals <- c("Do not know", "Prefer not to answer")
 
-reproductive_clean_rm <- reproductive_clean_rm %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     hearing_status = case_when(
       # 2 = objective hearing loss: aid user OR completely deaf (either main or pilot)
@@ -737,218 +698,70 @@ reproductive_clean_rm <- reproductive_clean_rm %>%
     )
   )
 
-unique(reproductive_clean_rm$hearing_status)
+unique(reproductive_rm$hearing_status)
 
-reproductive_clean_rm%>%
+reproductive_rm%>%
   group_by(hearing_status)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-reproductive_clean_rm$hearing_status_F <- as.factor(reproductive_clean_rm$hearing_status)
+reproductive_rm$hearing_status_F <- as.factor(reproductive_rm$hearing_status)
 
-levels(reproductive_clean_rm$hearing_status_F)
+levels(reproductive_rm$hearing_status_F)
 
-levels(reproductive_clean_rm$hearing_status_F) <- 
+levels(reproductive_rm$hearing_status_F) <- 
   c("No hearing problems", "Subjective difficulty", "Objective hearing loss")
 
-## Set reference levels 
 
-# dx download final_1.csv
-#reproductive_clean_rm <- read.csv("final_1.csv")
-reproductive_clean_rm$hrt_group <- relevel(as.factor(reproductive_clean_rm$hrt_group), ref = "None")
-reproductive_clean_rm$meno_group3 <- relevel(as.factor(reproductive_clean_rm$meno_group3), ref = "Average (45–55)")
-reproductive_clean_rm$oc_group  <- relevel(as.factor(reproductive_clean_rm$oc_group),  ref = "None")
-reproductive_clean_rm$number_births_group  <- relevel(as.factor(reproductive_clean_rm$number_births_group),  ref = "No children")
-#reproductive_clean_rm$smoker_status  <- relevel(as.factor(reproductive_clean_rm$smoker_status),  ref = "Never")
-#reproductive_clean_rm$alcohol_status  <- relevel(as.factor(reproductive_clean_rm$alcohol_status),  ref = "Never")
-
-
-reproductive_clean_rm%>%
-  group_by(meno_group3)%>%
+reproductive_rm%>%
+  group_by(hearing_status_F)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-### models with age insetad 
+# help seeking for depression 
+
+unique(reproductive_rm$Seen.doctor..GP..for.nerves..anxiety..tension.or.depression...Instance.0)
 
 
-
-#### Add new death, dementia/ loss to followup 
-
-newdeath<- read.csv("newoutcomes25_death.csv")
-
-newoc<- read.csv("newoutcomes25_participant.csv")
-
-newdeath$date_death25 <- newdeath$Date.of.death
-
-reproductive_clean_rm <- reproductive_clean_rm%>%
-  left_join(newdeath%>%
-              dplyr::select(Participant.ID, date_death25),
-            by='Participant.ID')
-
-newoc$Date.lost.to.follow.up25 <- newoc$Date.lost.to.follow.up
-
-newoc$Date.of.all.cause.dementia.report25 <- newoc$newoc$Date.of.all.cause.dementia.report
-
-
-newoc <- newoc %>%
-  mutate(
-    Date.of.all.cause.dementia.report =
-      na_if(Date.of.all.cause.dementia.report, "Date is unknown"),
-    Date.of.all.cause.dementia.report =
-      na_if(Date.of.all.cause.dementia.report, "")
-  )
-
-newoc <- newoc %>%
-  mutate(
-    dementia_date25 = coalesce(
-      as.Date(Date.of.all.cause.dementia.report),
-      as.Date(Date.F00.first.reported..dementia.in.alzheimer.s.disease.),
-      as.Date(Date.F01.first.reported..vascular.dementia.),
-      as.Date(Date.F02.first.reported..dementia.in.other.diseases.classified.elsewhere.),
-      as.Date(Date.F03.first.reported..unspecified.dementia.)
-    )
-  )
-
-newoc <- newoc %>%
-  mutate(
-    Date.lost.to.follow.up25=
-      na_if(Date.lost.to.follow.up, "")
-  )
-
-
-reproductive_clean_rm <- reproductive_clean_rm%>%
-  left_join(newoc%>%
-              dplyr::select(Participant.ID, Date.lost.to.follow.up25, dementia_date25),
-            by='Participant.ID')
-
-# time to event/ event status 
-
-reproductive_clean_rm$End_Point <- as.Date("2025-07-02")
-
-reproductive_clean_rm <- reproductive_clean_rm%>%
-  mutate(
-    across(c(Date.of.attending.assessment.centre...Instance.0,
-             dementia_date25,
-             date_death25,
-             Date.lost.to.follow.up25,
-             End_Point), ~ as.Date(.x)),
-    
-    # Determine event or censoring date
-    event_date = case_when(
-      !is.na(dementia_date25) ~ dementia_date25,
-      is.na(dementia_date25) & !is.na(date_death25) ~ date_death25,
-      is.na(dementia_date25) & is.na(date_death25) &
-        !is.na(Date.lost.to.follow.up25) ~ Date.lost.to.follow.up25,
-      TRUE ~ End_Point
-    ),
-    
-    # Calculate time to event or censoring (years)
-    time_to_event_years = as.numeric(
-      difftime(event_date,
-               Date.of.attending.assessment.centre...Instance.0,
-               units = "days")
-    ) / 365.25,
-    
-    # Dementia event indicator (1 = dementia, 0 = censored)
-    event_status = if_else(!is.na(dementia_date25), 1, 0)
-  )
-
-
-
-# 273036 at start
-# 99 people with dementia prior to baseline- we will remove
-
-summary(reproductive_clean_rm$time_to_event_years)
-sum(reproductive_clean_rm$time_to_event_years < 0, na.rm = TRUE)
-
-# 417 people got dementia within 5 years of baseline- also remove 
-
-reproductive_clean_rm<- reproductive_clean_rm%>%
-  mutate(
-    dementia_within5 = event_status == 1 & time_to_event_years <= 5
-  )
-
-
-
-#write.csv(reproductive,"reproductive.csv")
-
-### 9 addiotnal women with prev dementia 
-reproductive_clean_rm%>%
-  group_by(dementia_within5)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-reproductive_clean_rm%>%
-  group_by(event_status)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
-# Remove additonal women with dementia prior to baseline or dementia within 5 years of baseline (293)
-
-reproductive_clean_rm <- reproductive_clean_rm %>%
-  filter(
-    dementia_within5==FALSE,              # drop early dementia
-    !is.na(time_to_event_years),   # keep only those with valid follow-up
-    time_to_event_years >= 0       # drop any negative times
-  )
-
-sum(reproductive_clean_rm$dementia_within5 < 0, na.rm = TRUE)
-
-reproductive_clean_rm <- reproductive_clean_rm%>%
-  mutate(
-    # ensure dates are Date class
-    baseline_date = as.Date(Date.of.attending.assessment.centre...Instance.0),
-    event_date    = as.Date(event_date),
-    
-    # compute age at event
-    age_at_event = age_baseline+ as.numeric(event_date - baseline_date) / 365.25
-  )
-
-
-reproductive_clean_2 <- reproductive_clean_rm%>%
-  distinct(Participant.ID, .keep_all = TRUE)
-
-
-# depression 
-
-unique(reproductive$Seen.doctor..GP..for.nerves..anxiety..tension.or.depression...Instance.0)
-
-library(dplyr)
-
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     Seen_GP_nerves_YNU = case_when(
       Seen.doctor..GP..for.nerves..anxiety..tension.or.depression...Instance.0 == "Yes" ~ "Yes",
       Seen.doctor..GP..for.nerves..anxiety..tension.or.depression...Instance.0 == "No"  ~ "No",
       Seen.doctor..GP..for.nerves..anxiety..tension.or.depression...Instance.0 %in% 
         c("Do not know", "Prefer not to answer", "") |
-        is.na(Seen.doctor..GP..for.nerves..anxiety..tension.or.depression...Instance.0) ~ "Unknown"
+        is.na(Seen.doctor..GP..for.nerves..anxiety..tension.or.depression...Instance.0) ~ NA_character_
     )
   )
 
 
-reproductive%>%
+reproductive_rm%>%
   group_by(Seen_GP_nerves_YNU)%>%
   summarise(c=n_distinct(Participant.ID))
 
 # anxiety 
 
-unique(reproductive$Worrier...anxious.feelings...Instance.0)
+unique(reproductive_rm$Worrier...anxious.feelings...Instance.0)
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     anxious_collapsed = case_when(
       Worrier...anxious.feelings...Instance.0%in% c("Yes") ~ "Yes",
       Worrier...anxious.feelings...Instance.0%in% c("No") ~ "No",
       Worrier...anxious.feelings...Instance.0%in% c("Do not know", "Prefer not to answer", "") |
-        is.na(Worrier...anxious.feelings...Instance.0) ~ "Unknown"
+        is.na(Worrier...anxious.feelings...Instance.0) ~ NA_character_
     ))
-# keep a missing level to avoid losing N
-reproductive$anxious_collapsed =factor(reproductive$anxious_collapsed , levels = c("Yes","No","Unknown"))
 
-unique(reproductive$anxious_collapsed)
+unique(reproductive_rm$anxious_collapsed)
+
+reproductive_rm%>%
+  group_by(anxious_collapsed)%>%
+  summarise(c=n_distinct(Participant.ID))
+
 
 # alcohol 
 
-unique(reproductive$Alcohol.drinker.status...Instance.0)
+unique(reproductive_rm$Alcohol.drinker.status...Instance.0)
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     alcohol_status= case_when(
       Alcohol.drinker.status...Instance.0 == "Current" ~ "Current",
@@ -956,18 +769,20 @@ reproductive <- reproductive %>%
       Alcohol.drinker.status...Instance.0 == "Previous"  ~ "Previous",
       Alcohol.drinker.status...Instance.0  %in% 
         c("Do not know", "Prefer not to answer", "") |
-        is.na(Alcohol.drinker.status...Instance.0) ~ "Unknown"
+        is.na(Alcohol.drinker.status...Instance.0) ~ NA_character_
     )
   )
 
-# Set reference level
-reproductive$alcohol_status <- relevel(as.factor(reproductive$alcohol_status), ref = "Never")
+reproductive_rm%>%
+  group_by(alcohol_status)%>%
+  summarise(c=n_distinct(Participant.ID))
+
 
 # smoking 
 
-unique(reproductive$Smoking.status...Instance.0)
+unique(reproductive_rm$Smoking.status...Instance.0)
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     smoker_status= case_when(
       Smoking.status...Instance.0 == "Current" ~ "Current",
@@ -975,16 +790,17 @@ reproductive <- reproductive %>%
       Smoking.status...Instance.0== "Previous"  ~ "Previous",
       Smoking.status...Instance.0  %in% 
         c("Do not know", "Prefer not to answer", "") |
-        is.na(Smoking.status...Instance.0) ~ "Unknown"
+        is.na(Smoking.status...Instance.0) ~ NA_character_
     )
   )
 
-# Set reference level
-reproductive$smoker_status <- relevel(as.factor(reproductive$smoker_status), ref = "Never")
+reproductive_rm%>%
+  group_by(smoker_status)%>%
+  summarise(c=n_distinct(Participant.ID))
 
 # loneliness/ isolation score
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     leisure_collapsed = case_when(
       Leisure.social.activities...Instance.0 %in% c("None of the above") ~ "None",
@@ -998,12 +814,12 @@ reproductive <- reproductive %>%
   )
 
 
-reproductive%>%
+reproductive_rm%>%
   group_by(leisure_collapsed)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     friends_collapsed = case_when(
       Frequency.of.friend.family.visits...Instance.0 %in% c( "About once a week","2-4 times a week","Almost daily") ~ "Weekly",
@@ -1017,20 +833,20 @@ reproductive <- reproductive %>%
     friends_collapsed = factor(friends_collapsed, levels = c("Weekly","Monthly","Never","unknown"))
   )
 
-unique(reproductive$friends_collapsed)
+unique(reproductive_rm$friends_collapsed)
 
-reproductive%>%
+reproductive_rm%>%
   group_by(friends_collapsed)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-unique(reproductive$Number.in.household...Instance.0)
+unique(reproductive_rm$Number.in.household...Instance.0)
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     house_num = as.numeric(Number.in.household...Instance.0)  # Converts text like "Do not remember" to NA
   )
 
-reproductive<- reproductive %>%
+reproductive_rm<- reproductive_rm %>%
   mutate(
     house_F = case_when(
       house_num < 2 ~ "alone",        # living alone
@@ -1039,12 +855,12 @@ reproductive<- reproductive %>%
     )
   )
 # keep a missing level to avoid losing N
-reproductive$house_F = fct_explicit_na(reproductive$house_F , na_level = "unknown")
-reproductive$house_F = factor(reproductive$house_F , levels = c("alone","not alone","unknown"))
+reproductive_rm$house_F = fct_explicit_na(reproductive_rm$house_F , na_level = "unknown")
+reproductive_rm$house_F = factor(reproductive_rm$house_F , levels = c("alone","not alone","unknown"))
 
 
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     # high-risk: living alone
     iso_house = case_when(
@@ -1082,22 +898,25 @@ reproductive <- reproductive %>%
                                 levels = c("least isolated", "moderately isolated", "most isolated"))
   )
 
-unique(reproductive$Able.to.confide...Instance.0)
 
-reproductive%>%
+reproductive_rm%>%
+  group_by(isolation_category)%>%
+  summarise(cnt=n_distinct(Participant.ID))
+
+unique(reproductive_rm$Able.to.confide...Instance.0)
+
+reproductive_rm%>%
   group_by(Able.to.confide...Instance.0)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-reproductive%>%
+reproductive_rm%>%
   group_by(Loneliness..isolation...Instance.0)%>%
   summarise(cnt=n_distinct(Participant.ID))
 
-library(dplyr)
-library(forcats)
 
 ## 1. Collapse confiding (Instance 0)
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     confide_collapsed = case_when(
       Able.to.confide...Instance.0 %in% c("Almost daily", "2-4 times a week", "About once a week") ~ "weekly+",
@@ -1114,7 +933,7 @@ reproductive <- reproductive %>%
 
 ## 2. Collapse loneliness item (Instance 0)
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     loneliness = case_when(
       Loneliness..isolation...Instance.0 == "Yes"  ~ "Yes",
@@ -1127,7 +946,7 @@ reproductive <- reproductive %>%
 
 ## 3. Build numeric risk components
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     # high-risk factor 1: often/ever feel lonely
     lonely_risk = case_when(
@@ -1146,7 +965,7 @@ reproductive <- reproductive %>%
 
 ## 4. Total loneliness score and categories
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     # numeric score (0–2) where at least one component is known
     loneliness_score = lonely_risk + confide_risk,
@@ -1166,28 +985,32 @@ reproductive <- reproductive %>%
 
 ## 5. Quick check
 
-reproductive %>%
+reproductive_rm %>%
   count(loneliness_category)
 
-reproductive %>%
-  count(confide_collapsed)
-
-reproductive %>%
-  count(loneliness_score)
-
-reproductive %>%
-  count(isolation_score)
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    loneliness_category = na_if(loneliness_category, "Unknown")
+  )
 
 
 # deprivation quintiles
 
-unique(reproductive$Townsend.deprivation.index.at.recruitment)
+unique(reproductive_rm$Townsend.deprivation.index.at.recruitment)
 
-reproductive <- reproductive %>%
+# Get quintile cutpoints from full dataset
+cut_points <- quantile(
+  reproductive$Townsend.deprivation.index.at.recruitment,
+  probs = c(0, 0.2, 0.4, 0.6, 0.8, 1),
+  na.rm = TRUE
+)
+
+reproductive_rm <- reproductive_rm %>%
   mutate(
-    deprivation_quintiles = factor(
-      ntile(Townsend.deprivation.index.at.recruitment, 5),
-      levels = 1:5,
+    deprivation_quintiles = cut(
+      Townsend.deprivation.index.at.recruitment,
+      breaks = cut_points,
+      include.lowest = TRUE,
       labels = c("Q1 (least deprived)",
                  "Q2",
                  "Q3",
@@ -1196,15 +1019,17 @@ reproductive <- reproductive %>%
     )
   )
 
-# hbp meds, insulin, cholesterol 
+
+reproductive_rm %>%
+  group_by(deprivation_quintiles)%>%
+  summarise(count=n_distinct(Participant.ID))
 
 
-library(dplyr)
-library(stringr)
+# Blood pressure meds, Insulin, Cholesterol lowering meds:
 
 na_med_vals <- c("Do not know", "Prefer not to answer", "")
 
-reproductive_lag <- reproductive_lag %>%
+reproductive_rm <- reproductive_rm %>%
   mutate(
     med_raw = Medication.for.cholesterol..blood.pressure..diabetes..or.take.exogenous.hormones...Instance.0,
     
@@ -1267,18 +1092,24 @@ reproductive_lag <- reproductive_lag %>%
   ) %>%
   dplyr::select(-med_raw, -med_is_na)
 
+reproductive_rm %>%
+  group_by(current_bp)%>%
+  summarise(count=n_distinct(Participant.ID))
+
 # waist over 80
 
-reproductive$Waist.circumference...Instance.0 <- as.numeric(reproductive$Waist.circumference...Instance.0)
+reproductive_rm$Waist.circumference...Instance.0 <- as.numeric(reproductive_rm$Waist.circumference...Instance.0)
 
 
-reproductive$waist_over80 <- ifelse(reproductive$Waist.circumference...Instance.0 > 80, "Yes", "No")
+reproductive_rm$waist_over80 <- ifelse(reproductive_rm$Waist.circumference...Instance.0 > 80, "Yes", "No")
 
+reproductive_rm %>%
+  group_by(waist_over80)%>%
+  summarise(count=n_distinct(Participant.ID))
 
 # Get APOE
 
-# Download APOE 
-# dx download gen_apoe.csv
+# Download GWAS dataset
 
 apoe <- read.csv("gen_apoe.csv")
 
@@ -1299,7 +1130,7 @@ apoe%>%
 
 # Follow the processes above for joining APOE4 onto the demo table. 
 
-reproductive <- reproductive %>%
+reproductive_rm <- reproductive_rm %>%
   left_join(
     apoe %>% dplyr::select(ID, APOE4),
     by = c("Participant.ID" = "ID")
@@ -1308,13 +1139,13 @@ reproductive <- reproductive %>%
 
 ## Transform vitamins to yes/no
 
-unique(reproductive$Vitamin.and.mineral.supplements...Instance.0)
+unique(reproductive_rm$Vitamin.and.mineral.supplements...Instance.0)
 
-unique(reproductive$Vitamin.supplements..pilot....Instance.0)
+unique(reproductive_rm$Vitamin.supplements..pilot....Instance.0)
 
-unique(reproductive$Mineral.and.other.dietary.supplements...Instance.0)
+unique(reproductive_rm$Mineral.and.other.dietary.supplements...Instance.0)
 
-unique(reproductive$Vitamin.and.mineral.supplements..pilot....Instance.0)
+unique(reproductive_rm$Vitamin.and.mineral.supplements..pilot....Instance.0)
 
 # Define a function to merge pilot and non-pilot columns by combining unique values
 merge_columns <- function(df, col_main, col_pilot) {
@@ -1330,23 +1161,23 @@ merge_columns <- function(df, col_main, col_pilot) {
 }
 
 # Applying the function for each column pair
-reproductive$Combined_Mineral_Supplements <- merge_columns(reproductive, 
+reproductive_rm$Combined_Mineral_Supplements <- merge_columns(reproductive_rm, 
                                                            "Mineral.and.other.dietary.supplements...Instance.0",
                                                            "Vitamin.and.mineral.supplements..pilot....Instance.0")
 
-reproductive$Combined_Vitamin_Supplements <- merge_columns(reproductive,
+reproductive_rm$Combined_Vitamin_Supplements <- merge_columns(reproductive_rm,
                                                            "Vitamin.and.mineral.supplements...Instance.0",
                                                            "Vitamin.supplements..pilot....Instance.0")
 
 
 # Ensure correct column names and perform the join
 
-cat(colnames(reproductive), sep = "\n")
+cat(colnames(reproductive_rm), sep = "\n")
 
 # Get unique supplements from both columns
 unique_supplements <- unique(unlist(strsplit(
-  paste(reproductive$Combined_Mineral_Supplements,
-        reproductive$Combined_Vitamin_Supplements,
+  paste(reproductive_rm$Combined_Mineral_Supplements,
+        reproductive_rm$Combined_Vitamin_Supplements,
         sep = "|"),
   "\\|"
 )))
@@ -1359,39 +1190,39 @@ unique_supplements <- unique_supplements[unique_supplements != "" & !is.na(uniqu
 
 
 for (supp in unique_supplements) {
-  reproductive[[supp]] <- ifelse(
-    grepl(supp, reproductive$Combined_Mineral_Supplements, fixed = TRUE) |
-      grepl(supp, reproductive$Combined_Vitamin_Supplements, fixed = TRUE),
+  reproductive_rm[[supp]] <- ifelse(
+    grepl(supp, reproductive_rm$Combined_Mineral_Supplements, fixed = TRUE) |
+      grepl(supp, reproductive_rm$Combined_Vitamin_Supplements, fixed = TRUE),
     "Y",
     "N"
   )
 }
 
-nm <- names(reproductive)
+nm <- names(reproductive_rm)
 bad <- is.na(nm) | nm == ""
 nm[bad] <- paste0("unnamed_", seq_len(sum(bad)))
-names(reproductive) <- nm
+names(reproductive_rm) <- nm
 
 
 # Combine the two fish oil columns into the correctly named one
-reproductive$`Fish oil (including cod liver oil)` <- ifelse(
-  reproductive$`Fish oil (including cod liver oil)` == "Y" |
-    reproductive$`Fish oil (including cod liver oil` == "Y",
+reproductive_rm$`Fish oil (including cod liver oil)` <- ifelse(
+  reproductive_rm$`Fish oil (including cod liver oil)` == "Y" |
+    reproductive_rm$`Fish oil (including cod liver oil` == "Y",
   "Y",
   ifelse(
-    reproductive$`Fish oil (including cod liver oil)` == "N" &
-      reproductive$`Fish oil (including cod liver oil` == "N",
+    reproductive_rm$`Fish oil (including cod liver oil)` == "N" &
+      reproductive_rm$`Fish oil (including cod liver oil` == "N",
     "N",
     NA
   )
 )
 
 # Drop the broken-name column
-reproductive$`Fish oil (including cod liver oil` <- NULL
+reproductive_rm$`Fish oil (including cod liver oil` <- NULL
 
 
 # One combined PNA flag (TRUE if either column says Y)
-pna_vits <- (reproductive$`Prefer not to answer` == "Y")
+pna_vits <- (reproductive_rm$`Prefer not to answer` == "Y")
 
 vitamin_cols <- c(
   "Fish oil (including cod liver oil)",
@@ -1413,10 +1244,10 @@ vitamin_cols <- c(
   "Other supplements, vitamins or minerals"
 )
 
-setdiff(vitamin_cols, names(reproductive))
+setdiff(vitamin_cols, names(reproductive_rm))
 
 # Extract the vitamin columns as a matrix/data frame
-vit_mat <- reproductive[ , vitamin_cols, drop = FALSE]
+vit_mat <- reproductive_rm[ , vitamin_cols, drop = FALSE]
 
 # 1) Any supplement ticked?
 any_vit <- rowSums(vit_mat == "Y", na.rm = TRUE) > 0
@@ -1428,7 +1259,7 @@ all_vit_na <- rowSums(!is.na(vit_mat)) == 0
 prefer_not <- pna_vits
 
 # 4) Combine into Vitamins_YN
-reproductive$Vitamins_YN <- ifelse(
+reproductive_rm$Vitamins_YN <- ifelse(
   prefer_not, "Unknown",
   ifelse(
     any_vit, "Y",
@@ -1438,9 +1269,115 @@ reproductive$Vitamins_YN <- ifelse(
   )
 )
 
-unique(reproductive$Vitamins_YN)
+unique(reproductive_rm$Vitamins_YN)
 
-reproductive%>%
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    Vitamins_YN = na_if(Vitamins_YN, "Unknown")
+  )
+
+reproductive_rm%>%
   group_by(Vitamins_YN)%>%
   summarise(c=n_distinct(Participant.ID))
 
+
+## Cancer 
+colnames(reproductive_rm)
+
+unique(reproductive_rm$Cancer.diagnosed.by.doctor...Instance.0)
+
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    Cancer_YNU = case_when(
+      Cancer.diagnosed.by.doctor...Instance.0%in% c("Yes - you will be asked about this later by an interviewer") ~ "Yes",
+      Cancer.diagnosed.by.doctor...Instance.0%in% c("No") ~ "No",
+      Cancer.diagnosed.by.doctor...Instance.0%in% c("Do not know", "Prefer not to answer", "") |
+        is.na(Cancer.diagnosed.by.doctor...Instance.0) ~ NA_character_
+    ))
+
+
+
+reproductive_rm%>%
+  group_by(Cancer_YNU)%>%
+  summarise(c=n_distinct(Participant.ID))
+
+## Polypharmacy 
+
+reproductive_rm$number_meds <- reproductive_rm$Number.of.treatments.medications.taken...Instance.0
+
+## Age menarche
+
+reproductive_rm$age_menarche <- reproductive_rm$Age.when.periods.started..menarche....Instance.0
+
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    age_menarche = na_if(age_menarche, "Do not know"),
+    age_menarche = na_if(age_menarche, "Prefer not to answer"),
+    age_menarche = as.numeric(age_menarche)
+  )
+
+class(reproductive_rm$age_menarche)
+
+
+## Sleep
+
+reproductive_rm$sleep_hours<- reproductive_rm$Sleep.duration...Instance.0
+
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    sleep_hours = na_if(sleep_hours, "Do not know"),
+    sleep_hours = na_if(sleep_hours, "Prefer not to answer"),
+    sleep_hours = as.numeric(sleep_hours)
+  )
+
+class(reproductive_rm$sleep_hours)
+
+# bilateral oophorectomy 
+
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    bilateral_oophorectomy = if_else(
+      !is.na(age_bilateral_oophorectomy_combined),
+      "Y",
+      "N"
+    )
+  )
+
+reproductive_rm%>%
+  group_by(bilateral_oophorectomy)%>%
+  summarise(c=n_distinct(Participant.ID))
+
+
+# hysterectomy 
+
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    hysterectomy = if_else(
+      !is.na(age_hysterectomy_combined),
+      "Y",
+      "N"
+    )
+  )
+
+## Exercise
+
+# Exercise mins per week (transform TO LOW MEDIUM HIGH)
+
+unique(reproductive_rm$Summed.MET.minutes.per.week.for.all.activity...Instance.0)
+
+reproductive_rm <- reproductive_rm %>%
+  mutate(
+    exercise_category = case_when(
+      is.na(Summed.MET.minutes.per.week.for.all.activity...Instance.0) ~NA_character_,
+      Summed.MET.minutes.per.week.for.all.activity...Instance.0 < 600 ~ "<600 MET-min/week (low)",
+      Summed.MET.minutes.per.week.for.all.activity...Instance.0 >= 600 &
+        Summed.MET.minutes.per.week.for.all.activity...Instance.0 < 3000 ~ "600–3000 MET-min/week (medium)",
+      Summed.MET.minutes.per.week.for.all.activity...Instance.0 >= 3000 ~ "≥3000 MET-min/week (high)"
+    )
+  )
+
+reproductive_rm%>%
+  group_by(exercise_category)%>%
+  summarise(c=n_distinct(Participant.ID))
+
+write.csv(reproductive_rm, "final_version.csv")

@@ -4,7 +4,7 @@ library(officer)
 library(flextable)
 
 ## 1. Order menopause groups (just ordering, no renaming)
-reproductive_clean_rm_sum <- reproductive_clean_2 %>%
+reproductive_clean_rm_sum <- reproductive_rm %>%
   mutate(
     meno_group3 = factor(
       meno_group3,
@@ -36,7 +36,7 @@ vars_to_summarise <- intersect(
     "current_insulin", "Cancer_YNU",
     "waist_over80", "number_meds"
   ),
-  names(reproductive_clean_rm)
+  names(reproductive_rm)
 )
 
 ## 4. Build summary table

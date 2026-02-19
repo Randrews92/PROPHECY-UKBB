@@ -22,26 +22,20 @@ library(survival)
 
 ### Now we have a sample of 166736 women. 
 # dx download final_version.csv
-reproductive_clean_rm <- read.csv("final_version.csv")
+reproductive_rm <- read.csv("final_version.csv")
 
-n_distinct(reproductive_clean_rm $Participant.ID)
+n_distinct(reproductive_rm $Participant.ID)
 
 ## Set reference levels 
 
-# dx download final_1.csv
-#reproductive_clean_rm <- read.csv("final_1.csv")
-reproductive_clean_rm$hrt_group <- relevel(as.factor(reproductive_clean_rm$hrt_group), ref = "None")
-reproductive_clean_rm$meno_group3 <- relevel(as.factor(reproductive_clean_rm$meno_group3), ref = "Average (45–55)")
-reproductive_clean_rm$oc_group  <- relevel(as.factor(reproductive_clean_rm$oc_group),  ref = "None")
-reproductive_clean_rm$number_births_group  <- relevel(as.factor(reproductive_clean_rm$number_births_group),  ref = "No children")
-#reproductive_clean_rm$smoker_status  <- relevel(as.factor(reproductive_clean_rm$smoker_status),  ref = "Never")
-#reproductive_clean_rm$alcohol_status  <- relevel(as.factor(reproductive_clean_rm$alcohol_status),  ref = "Never")
+reproductive_rm$hrt_group <- relevel(as.factor(reproductive_rm$hrt_group), ref = "None")
+reproductive_rm$meno_group3 <- relevel(as.factor(reproductive_rm$meno_group3), ref = "Average (45–55)")
+reproductive_rm$oc_group  <- relevel(as.factor(reproductive_rm$oc_group),  ref = "None")
+reproductive_rm$number_births_group  <- relevel(as.factor(reproductive_rm$number_births_group),  ref = "No children")
+reproductive_rm$smoker_status <- relevel(as.factor(reproductive_rm$smoker_status), ref = "Current")
+reproductive_rm$alcohol_status <- relevel(as.factor(reproductive_rm$alcohol_status), ref = "Current")
 
-reproductive_clean_2 <-reproductive_clean_rm
-reproductive_clean_2%>%
-  group_by(meno_group3)%>%
-  summarise(cnt=n_distinct(Participant.ID))
-
+reproductive_rm <- droplevels(reproductive_rm)
 
 ##----------------------------------
 ## Model 1: Crude (meno_group3 only)
@@ -51,7 +45,7 @@ reproductive_clean_2%>%
 cox_m1 <- coxph(
   Surv(age_baseline, age_at_event, event_status) ~
     meno_group3,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_m1)
@@ -74,7 +68,7 @@ cox_m2 <- coxph(
     oc_group +
     bilateral_oophorectomy +
     hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_m2)
@@ -101,7 +95,7 @@ cox_m3 <- coxph(
     loneliness_category +
     isolation_category +
     hearing_status_F,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_m3)
@@ -133,7 +127,7 @@ cox_m4 <- coxph(
     HealthyDietScore_HDS +
     sleep_hours+
     Vitamins_YN,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 
@@ -174,12 +168,12 @@ cox_m5 <- coxph(
     current_bp +
     current_cholesterol +
     current_insulin,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_m5)
 
-library(car)
+### check VIF
 
 vif_m5 <- lm(
   age_baseline ~
@@ -211,17 +205,20 @@ vif_m5 <- lm(
     current_bp +
     current_cholesterol +
     current_insulin,
-  data = reproductive_clean_rm
+  data = reproductive_rm
 )
 
 vif(vif_m5)
 
 
-# this is your fully adjusted model
+# check proportional hazards
 
 
 ha <- cox.zph(cox_m5)
 ha
+
+
+### Create table of all models combined
 
 all_mods <- tbl_merge(
   tbls = list(
@@ -274,9 +271,6 @@ doc <- read_docx() |>
 
 print(doc, target = "all_models_age.docx")
 
-#write.csv(reproductive_clean, "reproductive_naomit.csv", row.names = FALSE)
-### Next steps, interogate missing data
-# core covars in all intercation models
 
 ################## INTERACTION MODELS ########################
 #### Hearing problems 
@@ -289,7 +283,7 @@ cox_hearing_int <- coxph(
     white_yn +deprivation_quintiles+
     age_menarche + number_births_group + oc_group +
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary (cox_hearing_int)
@@ -305,7 +299,7 @@ cox_smoke_int<- coxph(
     white_yn +deprivation_quintiles+
     age_menarche + number_births_group + oc_group +
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary (cox_smoke_int)
@@ -321,7 +315,7 @@ cox_alcohol_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group +
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_alcohol_int)
@@ -336,7 +330,7 @@ cox_diet_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group + 
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_diet_int)
@@ -352,7 +346,7 @@ cox_exercise_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group + 
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_exercise_int)
@@ -367,7 +361,7 @@ cox_sleep_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group + 
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_sleep_int)
@@ -381,7 +375,7 @@ cox_depr_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group + 
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_depr_int)
@@ -395,7 +389,7 @@ cox_anx_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group + 
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_anx_int)
@@ -411,7 +405,7 @@ cox_lone_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group +
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_lone_int)
@@ -426,7 +420,7 @@ cox_iso_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group + 
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_iso_int)
@@ -440,7 +434,7 @@ cox_hrt_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group +
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_hrt_int)
@@ -455,13 +449,13 @@ cox_vits_int <- coxph(
     white_yn + deprivation_quintiles +
     age_menarche + number_births_group + oc_group +
     bilateral_oophorectomy + hysterectomy,
-  data = reproductive_clean_2
+  data = reproductive_rm
 )
 
 summary(cox_vits_int)
 
 
-#write.csv(reproductive_clean_rm, 'final_1.csv')
+#write.csv(reproductive_rm, 'final_1.csv')
 
 #write.csv(reproductive_clean_imputed, 'final_imp_1.csv')
 library(broom)
@@ -601,7 +595,7 @@ plot_interactions(ints_med,
                   title = "Interactions of menopause age with HRT and vitamins")
 
 
-unique(reproductive_clean_rm$exercise_category)
+unique(reproductive_rm$exercise_category)
 
 summary(cox_m5)
 covars_df <- tidy(cox_m5) |>
